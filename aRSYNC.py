@@ -3,10 +3,10 @@ import mysql.connector, os, pathlib, sys, hashlib, shutil, time, datetime
 #Global VARs
 appcd = ''
 dbUserName = 'admin'
-dbPsw = '3Kmah%4gCVyrKL#3uTWPQ2NUv%BkshFu'
+dbPsw = 'examplePSW'
 dbTable = 'aRSYNC'
-dbHost = 'mediaserver.local'
-dbPort = '40000'
+dbHost = 'localhost'
+dbPort = '3306'
 speed = 0.05
 deldays = 14
 

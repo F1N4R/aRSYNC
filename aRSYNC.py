@@ -1,14 +1,12 @@
-#! /usr/bin/python
-
 import mysql.connector, os, pathlib, sys, hashlib, shutil, time, datetime
 
 #Global VARs
 appcd = ''
 dbUserName = 'admin'
-dbPsw = 'examplePSW'
+dbPsw = '3Kmah%4gCVyrKL#3uTWPQ2NUv%BkshFu'
 dbTable = 'aRSYNC'
-dbHost = 'localhost'
-dbPort = '3306'
+dbHost = 'mediaserver.local'
+dbPort = '40000'
 speed = 0.05
 deldays = 14
 
@@ -126,6 +124,28 @@ def dbMarkDeleted(hash, primaryPath, secondaryPath, isDir, location) -> tuple:
         cursor.close()
         cnx.close()
 
+#DB create Entry in DeletedIndex and delete Entry in primaryIndex
+def dbInsertDel(hash, primaryPath, secondaryPath, isDir, location) -> tuple:
+    date = datetime.date.today()
+    date = date + datetime.timedelta(days=deldays)
+    try:
+        cnx.connect()
+        cursor = cnx.cursor()
+
+        sql = "INSERT INTO deletedIndex (deleteAt, hash, primaryPath, secondaryPath, isDir, location, forceDelete) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+        val = (date, hash, primaryPath, secondaryPath, isDir, location, 0)
+
+        cursor.execute(sql, val)
+        cnx.commit()
+        if not cursor.rowcount == 1: return ('ERROR', 'dbCommitError')
+        else: return ('OK', 'dbCommitOK')
+    except Exception as e:
+        print(e)
+        return ('ERROR', 'ExceptionThrown')
+    finally:
+        cursor.close()
+        cnx.close()
+
 #DB delete entry in deletedIndex
 def dbDelEntryDel(hash, primaryPath, location) -> tuple:
     try:
@@ -167,6 +187,7 @@ def delSec(path, isDir) -> tuple:
 
 #Check if File is started as Main
 if __name__ == '__main__':
+    #MySQL Connection established. CNX because in DOCS it was also named CNX and i am bad at choosing names :D
     cnx = mysql.connector.connect(
         host=dbHost,
         port=dbPort,
@@ -202,6 +223,7 @@ if __name__ == '__main__':
                 indbchanged = 0
                 markedAsDeleted = 0
                 deleted = 0
+                cleanup = 0
                 error = 0
 
                 startTime = time.time()
@@ -314,6 +336,28 @@ if __name__ == '__main__':
                             else:
                                 print('OK: File on Secondary and DB deleted: {0}'.format(dbDelEntry[2]))
                                 deleted +=1
+                #For Loop to Compare Secondary Drive with primaryIndex / If files are Found that not in DB these files will be deleted in delayed Days, too
+                path = pathlib.Path(p[1])
+                files = path.rglob('*')
+                for file in files:
+                    if not pathlib.Path(file).is_dir():
+                        query = list(filter(lambda x:str(file) in x, rSelect))
+                        if len(query) == 0:
+                            cleanup +=1
+                            x = dbInsertDel(hash3(file), str(file).replace(p[1], p[0]), str(file), 0, p[0])
+                            if x[0] == 'OK': print('OK: UnIndexed File Found in Secondary Drive: {0}'.format(file))
+                            else: 
+                                print('ERROR: UnIndexed File Found in Secondary Drive: {0}\n{1}'.format(file, x[1]))
+                                error +=1
+                    else:
+                        query = list(filter(lambda x:str(file) in x, rSelect))
+                        if len(query) == 0:
+                            cleanup +=1
+                            x = dbInsertDel(str().zfill(64), str(file).replace(p[1], p[0]), str(file), 1, p[0])
+                            if x[0] == 'OK': print('OK: UnIndexed File Found in Secondary Drive: {0}'.format(file))
+                            else: 
+                                print('ERROR: UnIndexed File Found in Secondary Drive: {0}\n{1}'.format(file, x[1]))
+                                error +=1
 
 
                 #Results
@@ -324,6 +368,7 @@ if __name__ == '__main__':
                       '\nNot Found in DB: {0}'.format(notindb),
                       '\nMarked as Deleted: {0}'.format(markedAsDeleted),
                       '\nDeleted: {0}'.format(deleted),
+                      '\nCleanUp: {0}'.format(cleanup),
                       '\nERRORs: {0}'.format(error),
                       '\nExcution Time: {0} secounds'.format(round(time.time() - startTime, 2)),
                       '\n------------------------------')

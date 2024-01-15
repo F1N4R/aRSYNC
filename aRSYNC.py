@@ -1,3 +1,5 @@
+#! /usr/bin/python
+
 import mysql.connector, os, pathlib, sys, hashlib, shutil, time, datetime
 
 #Global VARs
@@ -7,8 +9,9 @@ dbPsw = 'examplePSW'
 dbTable = 'aRSYNC'
 dbHost = 'localhost'
 dbPort = '3306'
-speed = 0.05
+speed = 0.01
 deldays = 14
+output = True
 
 #My Stupid Method to Find where App is executed (to find config files and Co)
 if getattr(sys, 'frozen', False):
@@ -40,14 +43,20 @@ def hash3(path:str) -> str:
     
     return sha3.hexdigest()
 
+def cprint(t:str) -> None:
+    if output: print(t)
+    with open('output.log', "a", encoding='utf8', newline='\n') as f:
+        f.write(t + '\n')
+        f.close()
+
 #DB Insert to PrimaryIndex
-def dbInsertPri(fileHash, filePath, secPath, isDir, location) -> tuple:
+def dbInsertPri(filePath, secPath, modified, size, isDir, location) -> tuple:
     try:
         cnx.connect()
         cursor = cnx.cursor()
 
-        sql = "INSERT INTO primaryIndex (hash, primaryPath, secondaryPath, isDir, location) VALUES (%s, %s, %s, %s, %s)"
-        val = (fileHash, filePath, secPath, isDir, location)
+        sql = "INSERT INTO primaryIndex (primaryPath, secondaryPath, modified, size, isDir, location) VALUES (%s, %s, %s, %s, %s, %s)"
+        val = (filePath, secPath, modified, size, isDir, location)
         
         cursor.execute(sql, val)
         cnx.commit()
@@ -55,27 +64,27 @@ def dbInsertPri(fileHash, filePath, secPath, isDir, location) -> tuple:
         if cursor.rowcount == 1: return ('OK', 'dbCommitOK')
         else: return ('ERROR', 'dbCommitError')
     except Exception as e:
-        print(e)
+        cprint(e)
         return ('ERROR', 'ExceptionThrown')
     finally:
         cursor.close()
         cnx.close()
 
 #DB Update Hash for PrimaryIndex
-def dbUpdateHashPri(oldFilehash, newFileHash, filePath, location) -> tuple:
+def dbUpdateHashPri(modified, size, filePath, location) -> tuple:
     try:
         cnx.connect()
         cursor = cnx.cursor()
         
-        sql = "UPDATE primaryIndex SET hash = %s WHERE hash = %s and primaryPath = %s and location = %s"
-        val = (newFileHash, oldFilehash, filePath, location)
+        sql = "UPDATE primaryIndex SET modified = %s, size = %s WHERE primaryPath = %s and location = %s"
+        val = (modified, size, filePath, location)
 
         cursor.execute(sql, val)
         cnx.commit()
         if cursor.rowcount == 1: return ('OK', 'dbCommitOK')
         else: return ('ERROR', 'dbCommitError')
     except Exception as e:
-        print(e)
+        cprint(e)
         return ('ERROR', 'ExceptionThrown')
     finally:
         cursor.close()
@@ -95,22 +104,22 @@ def cpSec(file:str, fileDest:str) -> tuple:
         return ('ERROR', 'fileCopyError', e)
 
 #DB create Entry in DeletedIndex and delete Entry in primaryIndex
-def dbMarkDeleted(hash, primaryPath, secondaryPath, isDir, location) -> tuple:
+def dbMarkDeleted(primaryPath, secondaryPath, isDir, location) -> tuple:
     date = datetime.date.today()
     date = date + datetime.timedelta(days=deldays)
     try:
         cnx.connect()
         cursor = cnx.cursor()
 
-        sql = "INSERT INTO deletedIndex (deleteAt, hash, primaryPath, secondaryPath, isDir, location, forceDelete) VALUES (%s, %s, %s, %s, %s, %s, %s)"
-        val = (date, hash, primaryPath, secondaryPath, isDir, location, 0)
+        sql = "INSERT INTO deletedIndex (deleteAt, primaryPath, secondaryPath, location, isDir, forceDelete) VALUES (%s, %s, %s, %s, %s, %s)"
+        val = (date, primaryPath, secondaryPath, location, isDir, 0)
 
         cursor.execute(sql, val)
         cnx.commit()
         if not cursor.rowcount == 1: return ('ERROR', 'dbCommitError')
 
-        sql = "DELETE FROM primaryIndex WHERE hash = %s and primaryPath = %s and location = %s"
-        val = (hash, primaryPath, location)
+        sql = "DELETE FROM primaryIndex WHERE primaryPath = %s and location = %s"
+        val = (primaryPath, location)
 
         cursor.execute(sql, val)
         cnx.commit()
@@ -118,50 +127,82 @@ def dbMarkDeleted(hash, primaryPath, secondaryPath, isDir, location) -> tuple:
         else: return ('ERROR', 'dbCommitError')
 
     except Exception as e:
-        print(e)
+        cprint(e)
         return ('ERROR', 'ExceptionThrown')
     finally:
         cursor.close()
         cnx.close()
 
 #DB create Entry in DeletedIndex and delete Entry in primaryIndex
-def dbInsertDel(hash, primaryPath, secondaryPath, isDir, location) -> tuple:
+def dbInsertDel(primaryPath, secondaryPath, isDir, location) -> tuple:
     date = datetime.date.today()
     date = date + datetime.timedelta(days=deldays)
     try:
         cnx.connect()
         cursor = cnx.cursor()
 
-        sql = "INSERT INTO deletedIndex (deleteAt, hash, primaryPath, secondaryPath, isDir, location, forceDelete) VALUES (%s, %s, %s, %s, %s, %s, %s)"
-        val = (date, hash, primaryPath, secondaryPath, isDir, location, 0)
+        sql = "INSERT INTO deletedIndex (deleteAt, primaryPath, secondaryPath, location, isDir, forceDelete) VALUES (%s, %s, %s, %s, %s, %s)"
+        val = (date, primaryPath, secondaryPath, location, isDir, 0)
 
         cursor.execute(sql, val)
         cnx.commit()
         if not cursor.rowcount == 1: return ('ERROR', 'dbCommitError')
         else: return ('OK', 'dbCommitOK')
     except Exception as e:
-        print(e)
+        cprint(e)
         return ('ERROR', 'ExceptionThrown')
     finally:
         cursor.close()
         cnx.close()
 
 #DB delete entry in deletedIndex
-def dbDelEntryDel(hash, primaryPath, location) -> tuple:
+def dbDelEntryDel(primaryPath, location) -> tuple:
     try:
         cnx.connect()
         cursor = cnx.cursor()
 
-        sql = "DELETE FROM deletedIndex WHERE hash = %s and primaryPath = %s and location = %s"
-        val = (hash, primaryPath, location)
+        sql = "DELETE FROM deletedIndex WHERE primaryPath = %s and location = %s"
+        val = (primaryPath, location)
 
         cursor.execute(sql, val)
         cnx.commit()
         if cursor.rowcount == 1: return ('OK', 'dbCommitOK')
         else: return ('ERROR', 'dbCommitError')
     except Exception as e:
-        print(e)
+        cprint(e)
         return ('ERROR', 'ExceptionThrown')
+    finally:
+        cursor.close()
+        cnx.close()
+
+def dbSelectPri() -> list:
+    try:
+        cnx.connect()
+        cursor = cnx.cursor()
+        sql = "SELECT primaryPath, secondaryPath, modified, size, isDir FROM `primaryIndex` WHERE location = %s"
+        adr = (p[0],)
+
+        cursor.execute(sql, adr)
+        return cursor.fetchall()
+    except Exception as e:
+        cprint (e)
+        exit()
+    finally:
+        cursor.close()
+        cnx.close()
+
+def dbSelectDel() -> list:
+    try:
+        cnx.connect()
+        cursor = cnx.cursor()
+        sql = "SELECT deleteAt, primaryPath, secondaryPath, isDir, forceDelete FROM `deletedIndex` WHERE location = %s"
+        adr = (p[0],)
+
+        cursor.execute(sql, adr)
+        return cursor.fetchall()
+    except Exception as e:
+        cprint (e)
+        exit()
     finally:
         cursor.close()
         cnx.close()
@@ -174,7 +215,7 @@ def delSec(path, isDir) -> tuple:
             if pathlib.Path(path).exists(): return ('ERROR', 'fileStillExists')
             else: return ('OK', 'fileDeleted')
         except Exception as e:
-            print(e)
+            cprint(e)
             return ('ERROR', 'ExceptionThrown')
     else:
         try:
@@ -182,7 +223,7 @@ def delSec(path, isDir) -> tuple:
             if pathlib.Path(path).exists(): return ('ERROR', 'fileStillExists')
             else: return ('OK', 'fileDeleted')
         except Exception as e:
-            print(e)
+            cprint(e)
             return ('ERROR', 'ExceptionThrown')
 
 #Check if File is started as Main
@@ -196,179 +237,238 @@ if __name__ == '__main__':
         database=dbTable
     )
     cursor = cnx.cursor()
+    cursor.close()
+    cnx.close()
+
+    tNotindb = 0
+    tIndb = 0
+    tIndbchanged = 0
+    tMarkedAsDeleted = 0
+    tDeleted = 0
+    tCleanup = 0
+    tError = 0
 
     lines = ""
+    apptime = time.time()
     with open(appcd + "/path.conf") as txt:
         lines = txt.read().splitlines()
 
-        for l in lines:
-            p = l.split(">")
+        txt.close()
 
-            if os.path.exists(p[0]) and os.path.exists(p[1]):
-                #DB Select primaryIndex
-                sql = "SELECT hash, primaryPath, secondaryPath, isDir FROM `primaryIndex` WHERE location = %s"
-                adr = (p[0],)
+    for arg in sys.argv:
+        if arg == 'silent': output = False
 
-                cursor.execute(sql, adr)
-                rSelect = cursor.fetchall()
-        
-                cursor.close()
-                cnx.close()
+    print(str(output))
 
-                path = pathlib.Path(p[0])
-                files = path.rglob('*')
+    nowdate = datetime.datetime.now()
+    cprint('\n\naRSYNC Start at {0}'.format(nowdate.strftime('%H:%M:%S on %d.%m.%Y')))
 
-                notindb = 0
-                indb = 0
-                indbchanged = 0
-                markedAsDeleted = 0
-                deleted = 0
-                cleanup = 0
-                error = 0
+    for l in lines:
+        p = l.split(">")
 
-                startTime = time.time()
+        if os.path.exists(p[0]) and os.path.exists(p[1]):
+            #DB Select primaryIndex
+            rSelect = dbSelectPri()
 
-                #For Loop Compare Local Index with primaryIndex DB to find new Files / Deleted Files / Changed Files
-                for file in files:
-                    #Only Files
-                    if not pathlib.Path(file).is_dir():
-                        query = list(filter(lambda x:str(file) in x, rSelect))
-                        #New File found: CP File and create new Entry in DB
-                        if len(query) == 0:
-                            notindb +=1
-                            if not pathlib.Path(str(file).replace(p[0], p[1])).exists():
-                                r = cpSec(file, str(file).replace(p[0], p[1]))
-                                if r[0] == 'ERROR': 
-                                    print('Copy Error: {0} for File: {1}\n{2}'.format(r[1], file, r[1]))
-                                    error +=1
-                                else:
-                                    x = dbInsertPri(hash3(file), str(file), str(file).replace(p[0], p[1]), 0, str(p[0]))
-                                    if x[0] == 'OK': print('OK: New File found: {0}'.format(file))
-                                    else: 
-                                        print('ERROR: New File found: {0}\n{1}'.format(file, x[1]))
-                                        error +=1
-                            else:
-                                x = dbInsertPri(hash3(file), str(file), str(file).replace(p[0], p[1]), 0, str(p[0]))
-                                if x[0] == 'OK': print('OK: New File found: {0}'.format(file))
-                                else: 
-                                    print('ERROR: New File found: {0}\n{1}'.format(file,x[1]))
-                                    error += 1
-                        #File Hash has Changed: Update File Hash in DB and CP changed File to Secondary Drive
-                        elif not hash3(file) == query[0][0]:
-                            indbchanged += 1
-                            x = dbUpdateHashPri(query[0][0], hash3(file), str(file), str(p[0]))
-                            if x[0] == 'ERROR':
-                                print('ERROR: DB Hash Update failed: {0}\n{1}'.format(file, x[1]))
-                                error +=1
+            path = pathlib.Path(p[0])
+            files = path.rglob('*')
+
+            notindb = 0
+            indb = 0
+            indbchanged = 0
+            markedAsDeleted = 0
+            deleted = 0
+            cleanup = 0
+            error = 0
+
+            startTime = time.time()
+
+            #For Loop Compare Local Index with primaryIndex DB to find new Files / Deleted Files / Changed Files
+            for file in files:
+                #Only Files
+                lPath = pathlib.Path(file)
+                if not lPath.is_dir():
+                    query = list(filter(lambda x:str(file) in x, rSelect))
+                    #New File found: CP File and create new Entry in DB
+                    if len(query) == 0:
+                        notindb +=1
+                        if not pathlib.Path(str(file).replace(p[0], p[1])).exists():
                             r = cpSec(file, str(file).replace(p[0], p[1]))
                             if r[0] == 'ERROR': 
-                                print('Copy Error: {0} for File: {1}\n{2}'.format(r[1], file, r[1]))
-                                error +=1
-                            else: print('OK: Hash has changed: {0}'.format(file))
-                        #File is already Present in DB and CP File if not Exists on Secondary Drive
-                        else: 
-                            if not pathlib.Path(str(file).replace(p[0], p[1])).exists():
-                                r = cpSec(file, str(file).replace(p[0], p[1]))
-                                if r[0] == 'ERROR': 
-                                    print('Copy Error: {0} for File: {1}\n{2}'.format(r[1], file, r[1]))
-                                    error +=1
-                            indb +=1
-                    #Only Folders
-                    else:
-                        query = list(filter(lambda x:str(file) in x, rSelect))
-                        #New Folder Found: create Folder on Secondary Drive if not exists and create Entry in DB
-                        if len(query) == 0:
-                            if not pathlib.Path(str(file).replace(p[0], p[1])).exists(): os.makedirs(str(file).replace(p[0], p[1]))
-                            x = dbInsertPri(str().zfill(64), str(file), str(file).replace(p[0], p[1]), 1, str(p[0]))
-                            if x[0] == 'OK': print('OK: New Folder found: {0}'.format(file))
-                            else: print('ERROR: New Folder found: {0}\n{1}'.format(file, x[1]))
-                            notindb +=1
-                        #Folder is already Present in DB: create Folder if not exists on Secondary Drive
-                        else:
-                            if not pathlib.Path(str(file).replace(p[0], p[1])).exists(): os.makedirs(str(file).replace(p[0], p[1]))
-                            indb +=1
-                    time.sleep(speed)
-
-                #DB Select for deletedIndex
-                cnx.connect()
-                cursor = cnx.cursor()
-                sql = "SELECT hash, primaryPath, secondaryPath, isDir, deleteAt, forceDelete FROM `deletedIndex` WHERE location = %s"
-                adr = (p[0],)
-
-                cursor.execute(sql, adr)
-                delSelect = cursor.fetchall()
-
-                cursor.close()
-                cnx.close()
-
-                #For Loop primaryIndex DB with LocalIndex to find files that Deleted on Primary Drive
-                for dbEntry in rSelect:
-                    query = list(filter(lambda x:str(dbEntry) in x, delSelect))
-                    if not pathlib.Path(dbEntry[1]).exists():
-                        if len(query) == 0:
-                            x = dbMarkDeleted(hash=dbEntry[0], primaryPath=dbEntry[1], secondaryPath=dbEntry[2], isDir=dbEntry[3], location=p[0])
-                            if x[0] == 'OK': print('OK: Deleted File/Folder found: {0}'.format(dbEntry[1]))
-                            else: 
-                                print('ERROR: Deleted File/Folder found: {0}\n{1}'.format(dbEntry[1], x[1]))
-                            markedAsDeleted += 1
-
-                #For Loop DeleteIndex DB to Check DeleteAt Date and if Files are Still Present
-                for dbDelEntry in delSelect:
-                    if not pathlib.Path(dbDelEntry[2]).exists():
-                        x = dbDelEntryDel(dbDelEntry[0], dbDelEntry[1], p[0])
-                        if x == 'OK': print('OK: Entry Deleted in DB: {0}'.format(dbDelEntry[1]))
-                        else: print('ERROR: Entry Deleted in DB: {0}\n{1}'.format(dbDelEntry[1], x[1]))
-
-                    date = datetime.date.today()
-
-                    #Check if date is past or forceDelete is True
-                    if date >= dbDelEntry[4] or dbDelEntry[5] == 1:
-                        r = delSec(dbDelEntry[2], dbDelEntry[3])
-                        print((dbDelEntry[2], dbDelEntry[3]))
-                        if r[0] == 'ERROR': 
-                            print('ERROR: File not on Secondary deleted: {0}\n{1}'.format(dbDelEntry[2], r[1]))
-                            error +=1
-                        else:
-                            x = dbDelEntryDel(dbDelEntry[0], dbDelEntry[1], p[0])
-                            if x[0] == 'ERROR': 
-                                print('ERROR: File not deleted on DB: {0}\n{1}'.format(dbDelEntry[2], x[1]))
+                                cprint('Copy Error: {0} for File: {1}\n{2}'.format(r[1], file, r[1]))
                                 error +=1
                             else:
-                                print('OK: File on Secondary and DB deleted: {0}'.format(dbDelEntry[2]))
-                                deleted +=1
-                #For Loop to Compare Secondary Drive with primaryIndex / If files are Found that not in DB these files will be deleted in delayed Days, too
-                path = pathlib.Path(p[1])
-                files = path.rglob('*')
-                for file in files:
-                    if not pathlib.Path(file).is_dir():
-                        query = list(filter(lambda x:str(file) in x, rSelect))
-                        if len(query) == 0:
-                            cleanup +=1
-                            x = dbInsertDel(hash3(file), str(file).replace(p[1], p[0]), str(file), 0, p[0])
-                            if x[0] == 'OK': print('OK: UnIndexed File Found in Secondary Drive: {0}'.format(file))
+                                x = dbInsertPri(filePath=str(file), 
+                                                secPath= str(file).replace(p[0], p[1]), 
+                                                modified=lPath.stat().st_mtime, 
+                                                size=lPath.stat().st_size, 
+                                                isDir=0, 
+                                                location=str(p[0]))
+                                if x[0] == 'OK': cprint('OK: New File found: {0}'.format(file))
+                                else: 
+                                    cprint('ERROR: New File found: {0}\n{1}'.format(file, x[1]))
+                                    error +=1
+                        else:
+                            x = dbInsertPri(filePath=str(file), 
+                                            secPath= str(file).replace(p[0], p[1]), 
+                                            modified=lPath.stat().st_mtime, 
+                                            size=lPath.stat().st_size,
+                                            isDir=0, 
+                                            location=str(p[0]))
+                            if x[0] == 'OK': cprint('OK: New File found: {0}'.format(file))
                             else: 
-                                print('ERROR: UnIndexed File Found in Secondary Drive: {0}\n{1}'.format(file, x[1]))
+                                cprint('ERROR: New File found: {0}\n{1}'.format(file,x[1]))
+                                error += 1
+                    #File Hash has Changed: Update File Hash in DB and CP changed File to Secondary Drive
+                    elif not lPath.stat().st_mtime == query[0][2] or not lPath.stat().st_size == query[0][3]:
+                        indbchanged += 1
+                        x = dbUpdateHashPri(lPath.stat().st_mtime, lPath.stat().st_size, str(file), str(p[0]))
+                        if x[0] == 'ERROR':
+                            cprint('ERROR: DB Hash Update failed: {0}\n{1}'.format(file, x[1]))
+                            error +=1
+                        r = cpSec(file, str(file).replace(p[0], p[1]))
+                        if r[0] == 'ERROR': 
+                            cprint('Copy Error: {0} for File: {1}\n{2}'.format(r[1], file, r[1]))
+                            error +=1
+                        else: cprint('OK: Hash has changed: {0}'.format(file))
+                    #File is already Present in DB and CP File if not Exists on Secondary Drive
+                    else: 
+                        if not pathlib.Path(str(file).replace(p[0], p[1])).exists():
+                            r = cpSec(file, str(file).replace(p[0], p[1]))
+                            if r[0] == 'ERROR': 
+                                cprint('Copy Error: {0} for File: {1}\n{2}'.format(r[1], file, r[1]))
                                 error +=1
+                        indb +=1
+                #Only Folders
+                else:
+                    query = list(filter(lambda x:str(file) in x, rSelect))
+                    #New Folder Found: create Folder on Secondary Drive if not exists and create Entry in DB
+                    if len(query) == 0:
+                        if not pathlib.Path(str(file).replace(p[0], p[1])).exists(): os.makedirs(str(file).replace(p[0], p[1]))
+                        x = dbInsertPri(filePath=str(file), 
+                                        secPath=str(file).replace(p[0], p[1]), 
+                                        modified=0, 
+                                        size=0, 
+                                        isDir=1, 
+                                        location=str(p[0]))
+                        if x[0] == 'OK': cprint('OK: New Folder found: {0}'.format(file))
+                        else: cprint('ERROR: New Folder found: {0}\n{1}'.format(file, x[1]))
+                        notindb +=1
+                    #Folder is already Present in DB: create Folder if not exists on Secondary Drive
                     else:
-                        query = list(filter(lambda x:str(file) in x, rSelect))
-                        if len(query) == 0:
-                            cleanup +=1
-                            x = dbInsertDel(str().zfill(64), str(file).replace(p[1], p[0]), str(file), 1, p[0])
-                            if x[0] == 'OK': print('OK: UnIndexed File Found in Secondary Drive: {0}'.format(file))
-                            else: 
-                                print('ERROR: UnIndexed File Found in Secondary Drive: {0}\n{1}'.format(file, x[1]))
-                                error +=1
+                        if not pathlib.Path(str(file).replace(p[0], p[1])).exists(): os.makedirs(str(file).replace(p[0], p[1]))
+                        indb +=1
+                time.sleep(speed)
+
+            #DB Select for deletedIndex
+            delSelect = dbSelectDel()
+
+            #For Loop primaryIndex DB with LocalIndex to find files that Deleted on Primary Drive
+            #Index DBEntry // primaryPath, secondaryPath, modified, size, isDir
+            for dbEntry in rSelect:
+                query = list(filter(lambda x:str(dbEntry) in x, delSelect))
+                if not pathlib.Path(dbEntry[1]).exists():
+                    if len(query) == 0:
+                        x = dbMarkDeleted(dbEntry[0], dbEntry[1], dbEntry[2], p[0])
+                        if x[0] == 'OK': cprint('OK: Deleted File/Folder found: {0}'.format(dbEntry[0]))
+                        else: 
+                            cprint('ERROR: Deleted File/Folder found: {0}\n{1}'.format(dbEntry[0], x[1]))
+                        markedAsDeleted += 1
+
+            #For Loop DeleteIndex DB to Check DeleteAt Date and if Files are Still Present
+            for dbDelEntry in delSelect:
+                if not pathlib.Path(dbDelEntry[2]).exists():
+                    x = dbDelEntryDel(dbDelEntry[1], p[0])
+                    if x == 'OK': cprint('OK: Entry Deleted in DB: {0}'.format(dbDelEntry[1]))
+                    else: cprint('ERROR: Entry Deleted in DB: {0}\n{1}'.format(dbDelEntry[1], x[1]))
+
+                date = datetime.date.today()
+
+                #Check if date is past or forceDelete is True
+                if date >= dbDelEntry[0] or dbDelEntry[4] == 1:
+                    r = delSec(dbDelEntry[2], dbDelEntry[3])
+                    if r[0] == 'ERROR': 
+                        cprint('ERROR: File not on Secondary deleted: {0}\n{1}'.format(dbDelEntry[1], r[1]))
+                        error +=1
+                    else:
+                        x = dbDelEntryDel(dbDelEntry[1], p[0])
+                        if x[0] == 'ERROR': 
+                            cprint('ERROR: File not deleted on DB: {0}\n{1}'.format(dbDelEntry[1], x[1]))
+                            error +=1
+                        else:
+                            cprint('OK: File on Secondary and DB deleted: {0}'.format(dbDelEntry[1]))
+                            deleted +=1
+            #For Loop to Compare Secondary Drive with primaryIndex / If files are Found that not in DB these files will be deleted in delayed Days, too
+            path = pathlib.Path(p[1])
+            files = path.rglob('*')
+            delSelect = dbSelectDel()
+            rSelect = dbSelectPri()
+            for file in files:
+                if not pathlib.Path(file).is_dir():
+                    query = list(filter(lambda x:str(file) in x, rSelect))
+                    delquery = list(filter(lambda x:str(file) in x, delSelect))
+                    if len(query) == 0 and len(delquery) == 0:
+                        cleanup +=1
+                        x = dbInsertDel(str(file).replace(p[1], p[0]), str(file), 0, p[0])
+                        if x[0] == 'OK': cprint('OK: UnIndexed File Found in Secondary Drive: {0}'.format(file))
+                        else: 
+                            cprint('ERROR: UnIndexed File Found in Secondary Drive: {0}\n{1}'.format(file, x[1]))
+                            error +=1
+                else:
+                    query = list(filter(lambda x:str(file) in x, rSelect))
+                    delquery = list(filter(lambda x:str(file) in x, delSelect))
+                    if len(query) == 0 and len(delquery) == 0:
+                        cleanup +=1
+                        x = dbInsertDel(str(file).replace(p[1], p[0]), str(file), 1, p[0])
+                        if x[0] == 'OK': cprint('OK: UnIndexed File Found in Secondary Drive: {0}'.format(file))
+                        else: 
+                            cprint('ERROR: UnIndexed File Found in Secondary Drive: {0}\n{1}'.format(file, x[1]))
+                            error +=1
 
 
-                #Results
-                print('------------------------------',
-                      '\nResults for {0}'.format(p[0]),
-                      '\nIn DB found: {0}'.format(indb), 
-                      '\nIn DB found but Hash has changed: {0}'.format(indbchanged), 
-                      '\nNot Found in DB: {0}'.format(notindb),
-                      '\nMarked as Deleted: {0}'.format(markedAsDeleted),
-                      '\nDeleted: {0}'.format(deleted),
-                      '\nCleanUp: {0}'.format(cleanup),
-                      '\nERRORs: {0}'.format(error),
-                      '\nExcution Time: {0} secounds'.format(round(time.time() - startTime, 2)),
-                      '\n------------------------------')
+            #Results
+            runtime = ''
+            if (time.time() - startTime) > 60:
+                minutes = (time.time() - startTime) / 60
+                seconds = (time.time() - startTime) % 60
+                runtime = '{0}:{1}'.format(round(minutes),round(seconds))
+            else: runtime = '0:' + str(round(time.time() - startTime))
+
+            cprint('------------------------------')
+            cprint('Results for {0}:'.format(p[0]))
+            cprint('In DB found: {0}'.format(indb)) 
+            cprint('In DB found but File has changed: {0}'.format(indbchanged))
+            cprint('Not Found in DB: {0}'.format(notindb))
+            cprint('Marked as Deleted: {0}'.format(markedAsDeleted))
+            cprint('Deleted: {0}'.format(deleted))
+            cprint('CleanUp: {0}'.format(cleanup))
+            cprint('ERRORs: {0}'.format(error))
+            cprint('Excution Time: {0} secounds'.format(runtime))
+            cprint('------------------------------')
+
+            tNotindb += notindb
+            tIndb += indb
+            tIndbchanged += indbchanged
+            tMarkedAsDeleted += markedAsDeleted
+            tDeleted += deleted
+            tCleanup += cleanup
+            tError += error
+    
+    runtime = ''
+    if (time.time() - apptime) > 60:
+        minutes = (time.time() - apptime) / 60
+        seconds = (time.time() - apptime) % 60
+        runtime = '{0}:{1}'.format(round(minutes),round(seconds))
+    else: runtime = '0:' + str(round(time.time() - apptime))
+
+    cprint('------------------------------')
+    cprint('Results for {0}:'.format('Total Execution'))
+    cprint('In DB found: {0}'.format(tIndb)) 
+    cprint('In DB found but File has changed: {0}'.format(tIndbchanged))
+    cprint('Not Found in DB: {0}'.format(tNotindb))
+    cprint('Marked as Deleted: {0}'.format(tMarkedAsDeleted))
+    cprint('Deleted: {0}'.format(tDeleted))
+    cprint('CleanUp: {0}'.format(tCleanup))
+    cprint('ERRORs: {0}'.format(tError))
+    cprint('Total Excution Time: {0} Minutes'.format(runtime))
+    cprint('------------------------------')

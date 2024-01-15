@@ -258,8 +258,6 @@ if __name__ == '__main__':
     for arg in sys.argv:
         if arg == 'silent': output = False
 
-    print(str(output))
-
     nowdate = datetime.datetime.now()
     cprint('\n\naRSYNC Start at {0}'.format(nowdate.strftime('%H:%M:%S on %d.%m.%Y')))
 

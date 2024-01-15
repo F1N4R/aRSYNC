@@ -257,6 +257,7 @@ if __name__ == '__main__':
 
     for arg in sys.argv:
         if arg == 'silent': output = False
+        if arg == 'nospeed': speed = 0
 
     nowdate = datetime.datetime.now()
     cprint('\n\naRSYNC Start at {0}'.format(nowdate.strftime('%H:%M:%S on %d.%m.%Y')))

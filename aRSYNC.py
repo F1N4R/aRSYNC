@@ -8,7 +8,7 @@ dbUserName = 'admin'
 dbPsw = 'examplePSW'
 dbTable = 'aRSYNC'
 dbHost = 'localhost'
-dbPort = '3306'
+dbPort = '40000'
 speed = 0.01
 deldays = 14
 output = True
@@ -45,9 +45,15 @@ def hash3(path:str) -> str:
 
 def cprint(t:str) -> None:
     if output: print(t)
-    with open('output.log', "a", encoding='utf8', newline='\n') as f:
-        f.write(t + '\n')
-        f.close()
+    try:
+        with open('output.log', "a", encoding='utf8', newline='\n') as f:
+            try:
+                f.write(t + '\n')
+                f.close()
+            except (IOError, OSError) as e:
+                print('ERROR while writing to Logfile')
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        print('ERROR while opening Logfile')
 
 #DB Insert to PrimaryIndex
 def dbInsertPri(filePath, secPath, modified, size, isDir, location) -> tuple:
@@ -211,7 +217,7 @@ def dbSelectDel() -> list:
 def delSec(path, isDir) -> tuple:
     if isDir == 1:
         try:
-            shutil.rmtree(path)
+            shutil.rmtree(path, ignore_errors=True)
             if pathlib.Path(path).exists(): return ('ERROR', 'fileStillExists')
             else: return ('OK', 'fileDeleted')
         except Exception as e:
@@ -219,7 +225,7 @@ def delSec(path, isDir) -> tuple:
             return ('ERROR', 'ExceptionThrown')
     else:
         try:
-            pathlib.Path(path).unlink()
+            pathlib.Path(path).unlink(missing_ok=True)
             if pathlib.Path(path).exists(): return ('ERROR', 'fileStillExists')
             else: return ('OK', 'fileDeleted')
         except Exception as e:
@@ -375,16 +381,14 @@ if __name__ == '__main__':
                         markedAsDeleted += 1
 
             #For Loop DeleteIndex DB to Check DeleteAt Date and if Files are Still Present
+            date = datetime.date.today()
             for dbDelEntry in delSelect:
                 if not pathlib.Path(dbDelEntry[2]).exists():
                     x = dbDelEntryDel(dbDelEntry[1], p[0])
-                    if x == 'OK': cprint('OK: Entry Deleted in DB: {0}'.format(dbDelEntry[1]))
+                    if x[0] == 'OK': cprint('OK: Entry Deleted in DB: {0}'.format(dbDelEntry[1]))
                     else: cprint('ERROR: Entry Deleted in DB: {0}\n{1}'.format(dbDelEntry[1], x[1]))
-
-                date = datetime.date.today()
-
                 #Check if date is past or forceDelete is True
-                if date >= dbDelEntry[0] or dbDelEntry[4] == 1:
+                elif date >= dbDelEntry[0] or dbDelEntry[4] == 1:
                     r = delSec(dbDelEntry[2], dbDelEntry[3])
                     if r[0] == 'ERROR': 
                         cprint('ERROR: File not on Secondary deleted: {0}\n{1}'.format(dbDelEntry[1], r[1]))

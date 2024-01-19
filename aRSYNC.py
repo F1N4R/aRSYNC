@@ -10,7 +10,7 @@ dbTable = 'aRSYNC'
 dbHost = 'localhost'
 dbPort = '3306'
 speed = 0.01
-deldays = 14
+deldays = 7
 output = True
 
 #My Stupid Method to Find where App is executed (to find config files and Co)
@@ -48,7 +48,7 @@ def cprint(t:str) -> None:
     try:
         with open('output.log', "a", encoding='utf8', newline='\n') as f:
             try:
-                f.write(t + '\n')
+                f.write(str(t) + '\n')
                 f.close()
             except (IOError, OSError) as e:
                 print('ERROR while writing to Logfile')
@@ -372,9 +372,9 @@ if __name__ == '__main__':
             #Index DBEntry // primaryPath, secondaryPath, modified, size, isDir
             for dbEntry in rSelect:
                 query = list(filter(lambda x:str(dbEntry) in x, delSelect))
-                if not pathlib.Path(dbEntry[1]).exists():
+                if not pathlib.Path(dbEntry[0]).exists():
                     if len(query) == 0:
-                        x = dbMarkDeleted(dbEntry[0], dbEntry[1], dbEntry[2], p[0])
+                        x = dbMarkDeleted(dbEntry[0], dbEntry[1], dbEntry[4], p[0])
                         if x[0] == 'OK': cprint('OK: Deleted File/Folder found: {0}'.format(dbEntry[0]))
                         else: 
                             cprint('ERROR: Deleted File/Folder found: {0}\n{1}'.format(dbEntry[0], x[1]))

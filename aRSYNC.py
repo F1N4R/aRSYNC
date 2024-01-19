@@ -1,6 +1,7 @@
 #! /usr/bin/python
 
 import mysql.connector, os, pathlib, sys, hashlib, shutil, time, datetime
+from mysql.connector import errorcode
 
 #Global VARs
 appcd = ''
@@ -43,6 +44,7 @@ def hash3(path:str) -> str:
     
     return sha3.hexdigest()
 
+#Custom Print with Logging
 def cprint(t:str) -> None:
     if output: print(t)
     try:
@@ -181,6 +183,7 @@ def dbDelEntryDel(primaryPath, location) -> tuple:
         cursor.close()
         cnx.close()
 
+#Select for primaryIndex Table
 def dbSelectPri() -> list:
     try:
         cnx.connect()
@@ -197,6 +200,7 @@ def dbSelectPri() -> list:
         cursor.close()
         cnx.close()
 
+#Select for deletedIndex Table
 def dbSelectDel() -> list:
     try:
         cnx.connect()
@@ -207,7 +211,7 @@ def dbSelectDel() -> list:
         cursor.execute(sql, adr)
         return cursor.fetchall()
     except Exception as e:
-        cprint (e)
+        cprint(e)
         exit()
     finally:
         cursor.close()
@@ -234,18 +238,7 @@ def delSec(path, isDir) -> tuple:
 
 #Check if File is started as Main
 if __name__ == '__main__':
-    #MySQL Connection established. CNX because in DOCS it was also named CNX and i am bad at choosing names :D
-    cnx = mysql.connector.connect(
-        host=dbHost,
-        port=dbPort,
-        user=dbUserName,
-        password=dbPsw,
-        database=dbTable
-    )
-    cursor = cnx.cursor()
-    cursor.close()
-    cnx.close()
-
+    #main VARs
     tNotindb = 0
     tIndb = 0
     tIndbchanged = 0
@@ -255,8 +248,35 @@ if __name__ == '__main__':
     tError = 0
 
     lines = ""
+    cnx = None
+    cursor = None
+
     apptime = time.time()
-    with open(appcd + "/path.conf") as txt:
+
+    #MySQL Connection established. CNX because in DOCS it was also named CNX and i am bad at choosing names :D
+    try:
+        cnx = mysql.connector.connect(
+            host=dbHost,
+            port=dbPort,
+            user=dbUserName,
+            password=dbPsw,
+            database=dbTable
+        )
+    except mysql.connector.Error as err:
+        if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+            cprint("ERROR - DB - Access Denied - AUTHENTICATION")
+            exit(1)
+        elif err.errno == errorcode.ER_BAD_DB_ERROR:
+            cprint("ERROR - DB - Access Denied - DB_NOT_EXISTS")
+            exit(1)
+        else:
+            cprint(err)
+            exit(1)
+    else:
+        cursor = cnx.cursor()
+        cursor.close()
+        cnx.close()
+    with open(appcd + "/path.conf", 'r', encoding='utf-8') as txt:
         lines = txt.read().splitlines()
 
         txt.close()
@@ -381,6 +401,7 @@ if __name__ == '__main__':
                         markedAsDeleted += 1
 
             #For Loop DeleteIndex DB to Check DeleteAt Date and if Files are Still Present
+            #Index delSelect //deleteAt, primaryPath, secondaryPath, isDir, forceDelete
             date = datetime.date.today()
             for dbDelEntry in delSelect:
                 if not pathlib.Path(dbDelEntry[2]).exists():
